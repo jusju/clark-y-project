@@ -5,12 +5,14 @@ generate-hansa-ribs.py
 ======================
 Tuottaa yhden SVG-tiedoston, joka sisältää laserleikkausta varten:
   1) 20 siipikaarta (modifioitu Clark Y, t=10%, m=4.5%) — TE-linja suora,
-     LE siirtyy taaksepäin 1 mm/kaari, jänne 200→181 mm.
-     Kullakin kaarella johtoreunan katkaisu 4 mm, jättöreunan katkaisu 30 mm,
+     LE kapenee tasaisesti, jänne 350→300 mm (n. 2.63 mm/kaari).
+     Kullakin kaarella johtoreunan katkaisu 4 mm, jättöreunan katkaisu alkaa
+     kohdasta jossa profiilinkorkeus on 8 mm (vaihtelee jänteittäin),
      yläpinnan torsioura 100 x 1 mm sekä kaksi Ø7 mm reikää (110 ja 150 mm
-     alkup. jättöreunasta).
+     alkup. jättöreunasta) — reiät linjassa jättöreunan kanssa.
   2) Kaksi rimavanteen aihiota oikealle puolelle:
-        LE (~8.9mm, LE-reunan korkeus+1mm) x 1000 mm,  TE 30 x 1000 mm,  10 mm tyhjää välissä.
+        LE (profiilinkorkeus x=4mm + 1mm) x 1000 mm,
+        TE (juurikaaren TE-osuus, jossa korkeus>=8mm) x 1000 mm,  10 mm tyhjää välissä.
   3) 80 suorakulmaista kolmiota (kateetit 20 mm) kahdessa pystyrivissä,
      40 / rivi, 5 mm väli kolmioiden välissä.
   4) Jokaisen kappaleen leikkausviivassa on 2 mm:n pituisia "siltoja"
@@ -39,17 +41,20 @@ NPTS   = 400
 # SIIPIKAARIPARAMETRIT
 # ----------------------------------------------------------------------
 N_RIBS         = 20
-CHORD_ROOT_MM  = 200.0
-CHORD_STEP_MM  = 1.0
+CHORD_ROOT_MM  = 350.0
+CHORD_TIP_MM   = 300.0
+CHORD_STEP_MM  = (CHORD_ROOT_MM - CHORD_TIP_MM) / (N_RIBS - 1)  # ~2.63 mm/rib
 
-LE_RIM_WIDTH_MM = 4.0
-TE_RIM_WIDTH_MM = 30.0
+LE_RIM_WIDTH_MM      = 4.0
+TE_CUTOFF_HEIGHT_MM  = 8.0   # TE cut starts where airfoil is this tall
 
 SLOT_WIDTH_MM = 100.0
 SLOT_DEPTH_MM = 1.0
 
-HOLE_DIAM_MM             = 7.0
-HOLE_POSITIONS_FROM_TE_MM = [110.0, 150.0]   # 11 cm ja 15 cm alkup. jättöreunasta
+HOLE_DIAM_MM = 7.0
+# Reiät ~20 % ja ~60 % juurikaaren jänteestä LE:stä — muunnettu kiinteäksi TE-etäisyydeksi,
+# jotta reiät pysyvät suorassa linjassa jättöreunan kanssa koko siiven pituudella.
+HOLE_POSITIONS_FROM_TE_MM = [CHORD_ROOT_MM * (1.0 - f) for f in (0.20, 0.60)]
 
 # ----------------------------------------------------------------------
 # RIMOJEN AIHIOT
@@ -132,13 +137,28 @@ def le_rim_stock_width() -> float:
                  np.interp(LE_RIM_WIDTH_MM, x_mm, y_lo)) + 1.0
 
 
+def find_x_te(chord_mm: float) -> float:
+    """Return the x position where airfoil total height first drops below TE_CUTOFF_HEIGHT_MM."""
+    x_mm, y_up, y_lo, _ = airfoil_xy(chord_mm)
+    thickness = y_up - y_lo
+    mask = thickness >= TE_CUTOFF_HEIGHT_MM
+    if not np.any(mask):
+        return chord_mm
+    return float(x_mm[mask][-1])
+
+
+def te_rim_stock_width() -> float:
+    """TE rim stock width = widest TE section across all ribs (always the root rib)."""
+    return CHORD_ROOT_MM - find_x_te(CHORD_ROOT_MM)
+
+
 # ======================================================================
 # KAAREN ÄÄRIVIIVA
 # ======================================================================
 def rib_outline(chord_mm: float) -> List[Tuple[float, float]]:
     x_mm, y_up, y_lo, _ = airfoil_xy(chord_mm)
     x_LE    = LE_RIM_WIDTH_MM
-    x_TE    = chord_mm - TE_RIM_WIDTH_MM
+    x_TE    = find_x_te(chord_mm)
     x_slotA = LE_RIM_WIDTH_MM
     x_slotB = LE_RIM_WIDTH_MM + SLOT_WIDTH_MM
 
@@ -296,8 +316,9 @@ def _triangle_layout():
 
 def total_width() -> float:
     le_w = le_rim_stock_width()
+    te_w = te_rim_stock_width()
     rims = (RIM_GAP_FROM_RIBS_MM + le_w
-            + RIM_GAP_BETWEEN_STOCKS_MM + TE_RIM_WIDTH_MM)
+            + RIM_GAP_BETWEEN_STOCKS_MM + te_w)
     per_col, n_cols = _triangle_layout()
     tri_w = (n_cols * TRIANGLE_LEG_MM
              + max(0, n_cols - 1) * TRIANGLE_COL_GAP_MM)
@@ -351,6 +372,7 @@ def build_svg() -> str:
     # --- Rimojen aihiot ---
     body.append('    <!-- Rimojen aihiot -->')
     le_w      = le_rim_stock_width()
+    te_w      = te_rim_stock_width()
     rim_y_top = PAGE_MARGIN_MM
     rim_le_x  = te_x + RIM_GAP_FROM_RIBS_MM
     rim_te_x  = rim_le_x + le_w + RIM_GAP_BETWEEN_STOCKS_MM
@@ -368,13 +390,13 @@ def build_svg() -> str:
         body.append(f'    <path d="{d}" />')
 
     te_rect = [
-        (rim_te_x,                    rim_y_top),
-        (rim_te_x + TE_RIM_WIDTH_MM,  rim_y_top),
-        (rim_te_x + TE_RIM_WIDTH_MM,  rim_y_top + RIM_STOCK_LENGTH_MM),
-        (rim_te_x,                    rim_y_top + RIM_STOCK_LENGTH_MM),
+        (rim_te_x,          rim_y_top),
+        (rim_te_x + te_w,   rim_y_top),
+        (rim_te_x + te_w,   rim_y_top + RIM_STOCK_LENGTH_MM),
+        (rim_te_x,          rim_y_top + RIM_STOCK_LENGTH_MM),
     ]
     for d in emit_paths_with_tabs(te_rect,
-                                  tabs_rectangle(TE_RIM_WIDTH_MM,
+                                  tabs_rectangle(te_w,
                                                  RIM_STOCK_LENGTH_MM,
                                                  RIM_TE_TABS_PER_LONG_SIDE)):
         body.append(f'    <path d="{d}" />')
@@ -384,15 +406,15 @@ def build_svg() -> str:
     body.append(f'    <text x="{rim_le_x + le_w/2:.3f}" '
                 f'y="{label_y:.3f}" font-family="sans-serif" font-size="3.0" '
                 f'text-anchor="middle" fill="black" stroke="none">LE {le_w:.1f}x1000</text>')
-    body.append(f'    <text x="{rim_te_x + TE_RIM_WIDTH_MM/2:.3f}" '
+    body.append(f'    <text x="{rim_te_x + te_w/2:.3f}" '
                 f'y="{label_y:.3f}" font-family="sans-serif" font-size="3.0" '
-                f'text-anchor="middle" fill="black" stroke="none">TE 30x1000</text>')
+                f'text-anchor="middle" fill="black" stroke="none">TE {te_w:.1f}x1000</text>')
 
     # --- 80 kolmiota ---
     body.append('    <!-- Suorakulmaiset kolmiot -->')
     per_col, n_cols = _triangle_layout()
     tri_first_col_x = (te_x + RIM_GAP_FROM_RIBS_MM + le_w
-                       + RIM_GAP_BETWEEN_STOCKS_MM + TE_RIM_WIDTH_MM
+                       + RIM_GAP_BETWEEN_STOCKS_MM + te_w
                        + TRIANGLE_GAP_FROM_RIMS_MM)
 
     for ti in range(N_TRIANGLES):
@@ -444,7 +466,7 @@ def main() -> None:
     print(f"  Mitattu:  paksuus={max_thick_pct:.2f}%  kamberi={max_camber_pct:.2f}%")
     print(f"  Kaaria:   {N_RIBS} kpl, janne {CHORD_ROOT_MM:.0f}->{chord_tip:.0f} mm")
     print(f"  Rimat:    LE {le_rim_stock_width():.2f}x{RIM_STOCK_LENGTH_MM:.0f}, "
-          f"TE {TE_RIM_WIDTH_MM:.0f}x{RIM_STOCK_LENGTH_MM:.0f} mm")
+          f"TE {te_rim_stock_width():.2f}x{RIM_STOCK_LENGTH_MM:.0f} mm")
     print(f"  Kolmiot:  {N_TRIANGLES} kpl, {per_col} kpl/pystyrivi x "
           f"{n_cols} riviä, kateetit {TRIANGLE_LEG_MM:.0f} mm")
     print(f"  Sillat:   {TAB_LENGTH_MM:.1f} mm aukot leikkausviivassa")
