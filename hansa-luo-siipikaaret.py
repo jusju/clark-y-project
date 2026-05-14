@@ -10,7 +10,7 @@ Tuottaa yhden SVG-tiedoston, joka sisältää laserleikkausta varten:
      yläpinnan torsioura 100 x 1 mm sekä kaksi Ø7 mm reikää (110 ja 150 mm
      alkup. jättöreunasta).
   2) Kaksi rimavanteen aihiota oikealle puolelle:
-        LE 4 x 1000 mm,  TE 30 x 1000 mm,  10 mm tyhjää välissä.
+        LE (~8.9mm, LE-reunan korkeus+1mm) x 1000 mm,  TE 30 x 1000 mm,  10 mm tyhjää välissä.
   3) 80 suorakulmaista kolmiota (kateetit 20 mm) kahdessa pystyrivissä,
      40 / rivi, 5 mm väli kolmioiden välissä.
   4) Jokaisen kappaleen leikkausviivassa on 2 mm:n pituisia "siltoja"
@@ -123,6 +123,13 @@ def airfoil_xy(chord_mm, npts=NPTS):
     else:
         yc = naca_camber(x_rel, M_CAM, P_CAM)
     return (x_rel*chord_mm, (yc+yt)*chord_mm, (yc-yt)*chord_mm, yc*chord_mm)
+
+
+def le_rim_stock_width() -> float:
+    """Airfoil height at the flat LE face (x=LE_RIM_WIDTH_MM) plus 1 mm tolerance."""
+    x_mm, y_up, y_lo, _ = airfoil_xy(CHORD_ROOT_MM)
+    return float(np.interp(LE_RIM_WIDTH_MM, x_mm, y_up) -
+                 np.interp(LE_RIM_WIDTH_MM, x_mm, y_lo)) + 1.0
 
 
 # ======================================================================
@@ -288,7 +295,8 @@ def _triangle_layout():
 
 
 def total_width() -> float:
-    rims = (RIM_GAP_FROM_RIBS_MM + LE_RIM_WIDTH_MM
+    le_w = le_rim_stock_width()
+    rims = (RIM_GAP_FROM_RIBS_MM + le_w
             + RIM_GAP_BETWEEN_STOCKS_MM + TE_RIM_WIDTH_MM)
     per_col, n_cols = _triangle_layout()
     tri_w = (n_cols * TRIANGLE_LEG_MM
@@ -342,18 +350,19 @@ def build_svg() -> str:
 
     # --- Rimojen aihiot ---
     body.append('    <!-- Rimojen aihiot -->')
+    le_w      = le_rim_stock_width()
     rim_y_top = PAGE_MARGIN_MM
     rim_le_x  = te_x + RIM_GAP_FROM_RIBS_MM
-    rim_te_x  = rim_le_x + LE_RIM_WIDTH_MM + RIM_GAP_BETWEEN_STOCKS_MM
+    rim_te_x  = rim_le_x + le_w + RIM_GAP_BETWEEN_STOCKS_MM
 
     le_rect = [
-        (rim_le_x,                    rim_y_top),
-        (rim_le_x + LE_RIM_WIDTH_MM,  rim_y_top),
-        (rim_le_x + LE_RIM_WIDTH_MM,  rim_y_top + RIM_STOCK_LENGTH_MM),
-        (rim_le_x,                    rim_y_top + RIM_STOCK_LENGTH_MM),
+        (rim_le_x,          rim_y_top),
+        (rim_le_x + le_w,   rim_y_top),
+        (rim_le_x + le_w,   rim_y_top + RIM_STOCK_LENGTH_MM),
+        (rim_le_x,          rim_y_top + RIM_STOCK_LENGTH_MM),
     ]
     for d in emit_paths_with_tabs(le_rect,
-                                  tabs_rectangle(LE_RIM_WIDTH_MM,
+                                  tabs_rectangle(le_w,
                                                  RIM_STOCK_LENGTH_MM,
                                                  RIM_LE_TABS_PER_LONG_SIDE)):
         body.append(f'    <path d="{d}" />')
@@ -372,9 +381,9 @@ def build_svg() -> str:
 
     # Pienet otsikkotekstit rimojen yläpäähän
     label_y = rim_y_top - 1.5
-    body.append(f'    <text x="{rim_le_x + LE_RIM_WIDTH_MM/2:.3f}" '
+    body.append(f'    <text x="{rim_le_x + le_w/2:.3f}" '
                 f'y="{label_y:.3f}" font-family="sans-serif" font-size="3.0" '
-                f'text-anchor="middle" fill="black" stroke="none">LE 4x1000</text>')
+                f'text-anchor="middle" fill="black" stroke="none">LE {le_w:.1f}x1000</text>')
     body.append(f'    <text x="{rim_te_x + TE_RIM_WIDTH_MM/2:.3f}" '
                 f'y="{label_y:.3f}" font-family="sans-serif" font-size="3.0" '
                 f'text-anchor="middle" fill="black" stroke="none">TE 30x1000</text>')
@@ -382,7 +391,7 @@ def build_svg() -> str:
     # --- 80 kolmiota ---
     body.append('    <!-- Suorakulmaiset kolmiot -->')
     per_col, n_cols = _triangle_layout()
-    tri_first_col_x = (te_x + RIM_GAP_FROM_RIBS_MM + LE_RIM_WIDTH_MM
+    tri_first_col_x = (te_x + RIM_GAP_FROM_RIBS_MM + le_w
                        + RIM_GAP_BETWEEN_STOCKS_MM + TE_RIM_WIDTH_MM
                        + TRIANGLE_GAP_FROM_RIMS_MM)
 
@@ -433,8 +442,8 @@ def main() -> None:
     print(f"Tallennettu {out_path}")
     print(f"  Profiili: t/c={T_REL:.3f}  m/c={max_camber_pct/100:.3f}")
     print(f"  Mitattu:  paksuus={max_thick_pct:.2f}%  kamberi={max_camber_pct:.2f}%")
-    print(f"  Kaaria:   {N_RIBS} kpl, jänne {CHORD_ROOT_MM:.0f}→{chord_tip:.0f} mm")
-    print(f"  Rimat:    LE {LE_RIM_WIDTH_MM:.0f}x{RIM_STOCK_LENGTH_MM:.0f}, "
+    print(f"  Kaaria:   {N_RIBS} kpl, janne {CHORD_ROOT_MM:.0f}->{chord_tip:.0f} mm")
+    print(f"  Rimat:    LE {le_rim_stock_width():.2f}x{RIM_STOCK_LENGTH_MM:.0f}, "
           f"TE {TE_RIM_WIDTH_MM:.0f}x{RIM_STOCK_LENGTH_MM:.0f} mm")
     print(f"  Kolmiot:  {N_TRIANGLES} kpl, {per_col} kpl/pystyrivi x "
           f"{n_cols} riviä, kateetit {TRIANGLE_LEG_MM:.0f} mm")
