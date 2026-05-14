@@ -55,6 +55,9 @@ HOLE_DIAM_MM = 7.0
 # Reiät ~20 % ja ~60 % juurikaaren jänteestä LE:stä — muunnettu kiinteäksi TE-etäisyydeksi,
 # jotta reiät pysyvät suorassa linjassa jättöreunan kanssa koko siiven pituudella.
 HOLE_POSITIONS_FROM_TE_MM = [CHORD_ROOT_MM * (1.0 - f) for f in (0.20, 0.60)]
+# Servon johtoreikä: 200 mm TE:stä — välissä 140 ja 280, ei puolivälissä (210).
+# Ei piirretä uloimpaan kaareen (veden sisäänpääsyn estämiseksi).
+WIRE_HOLE_FROM_TE_MM = 200.0
 
 # ----------------------------------------------------------------------
 # RIMOJEN AIHIOT
@@ -368,6 +371,15 @@ def build_svg() -> str:
         x_mm_c, _, _, yc = airfoil_xy(chord)
         for d_te in HOLE_POSITIONS_FROM_TE_MM:
             x_hole = chord - d_te
+            yc_h = float(np.interp(x_hole, x_mm_c, yc))
+            cx = x_hole + x_shift
+            cy = y_center - yc_h
+            body.append(f'    <circle cx="{cx:.4f}" cy="{cy:.4f}" '
+                        f'r="{HOLE_DIAM_MM/2:.4f}" />')
+
+        # Servon johtoreikä — ei uloimmassa kaaressa (veden estäminen)
+        if k < N_RIBS:
+            x_hole = chord - WIRE_HOLE_FROM_TE_MM
             yc_h = float(np.interp(x_hole, x_mm_c, yc))
             cx = x_hole + x_shift
             cy = y_center - yc_h
