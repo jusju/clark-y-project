@@ -64,6 +64,13 @@ RIM_GAP_FROM_RIBS_MM      = 10.0
 RIM_GAP_BETWEEN_STOCKS_MM = 10.0
 
 # ----------------------------------------------------------------------
+# SIIVEKKEET
+# ----------------------------------------------------------------------
+N_AILERON_RIBS       = 6     # uloimmat kaaret 15-20
+RIB_THICKNESS_MM     = 8.0   # yhden siipikaaren paksuus
+SPACER_GAP_MM        = 10.0  # väli kolmioiden ja välipalojen välillä
+
+# ----------------------------------------------------------------------
 # SUORAKULMAISET KOLMIOT
 # ----------------------------------------------------------------------
 TRIANGLE_LEG_MM           = 20.0    # molemmat kateetit
@@ -314,6 +321,13 @@ def _triangle_layout():
     return per_col, n_cols
 
 
+def spacer_dims() -> tuple:
+    """(length, height) of one aileron spacer piece."""
+    length = RIB_PITCH_MM - RIB_THICKNESS_MM          # 50 - 8 = 42 mm
+    height = TE_CUTOFF_HEIGHT_MM + 1.0                 # 8 + 1 = 9 mm
+    return length, height
+
+
 def total_width() -> float:
     le_w = le_rim_stock_width()
     te_w = te_rim_stock_width()
@@ -322,7 +336,9 @@ def total_width() -> float:
     per_col, n_cols = _triangle_layout()
     tri_w = (n_cols * TRIANGLE_LEG_MM
              + max(0, n_cols - 1) * TRIANGLE_COL_GAP_MM)
-    return PAGE_MARGIN_MM * 2 + CHORD_ROOT_MM + rims + TRIANGLE_GAP_FROM_RIMS_MM + tri_w
+    sp_len, _ = spacer_dims()
+    return (PAGE_MARGIN_MM * 2 + CHORD_ROOT_MM + rims
+            + TRIANGLE_GAP_FROM_RIMS_MM + tri_w + SPACER_GAP_MM + sp_len)
 
 
 def total_height() -> float:
@@ -401,6 +417,13 @@ def build_svg() -> str:
                                                  RIM_TE_TABS_PER_LONG_SIDE)):
         body.append(f'    <path d="{d}" />')
 
+    # Jättöriман katkaisu: siivekkeen ja siiven välinen raja, 2 mm siltoja kummassakin päässä
+    body.append('    <!-- Jattoreunarimakatkaisu siivekkeen kohdalla -->')
+    y_cut = rim_y_top + RIM_STOCK_LENGTH_MM - N_AILERON_RIBS * RIB_PITCH_MM
+    cut_d = (f'M {rim_te_x + TAB_LENGTH_MM:.4f},{y_cut:.4f} '
+             f'L {rim_te_x + te_w - TAB_LENGTH_MM:.4f},{y_cut:.4f}')
+    body.append(f'    <path d="{cut_d}" />')
+
     # Pienet otsikkotekstit rimojen yläpäähän
     label_y = rim_y_top - 1.5
     body.append(f'    <text x="{rim_le_x + le_w/2:.3f}" '
@@ -428,6 +451,28 @@ def build_svg() -> str:
             (col_x,                       row_y + TRIANGLE_LEG_MM),
         ]
         for d in emit_paths_with_tabs(tri_pts, tabs_triangle(TRIANGLE_LEG_MM)):
+            body.append(f'    <path d="{d}" />')
+
+    # --- Siivekkeen välipalapalat (5 kpl, kaarien 15-20 väliin) ---
+    body.append('    <!-- Siivekkeen valipalat -->')
+    sp_len, sp_h = spacer_dims()
+    tri_right_x = (tri_first_col_x + n_cols * TRIANGLE_LEG_MM
+                   + max(0, n_cols - 1) * TRIANGLE_COL_GAP_MM)
+    spacer_x = tri_right_x + SPACER_GAP_MM
+    n_spacers = N_AILERON_RIBS - 1   # 5 palaa
+
+    for si in range(n_spacers):
+        sy = PAGE_MARGIN_MM + si * (sp_h + 5.0)
+        sp_pts = [
+            (spacer_x,             sy),
+            (spacer_x + sp_len,    sy),
+            (spacer_x + sp_len,    sy + sp_h),
+            (spacer_x,             sy + sp_h),
+        ]
+        # Silta ylä- ja alareunassa keskellä
+        tab1 = sp_len / 2.0
+        tab2 = sp_len + sp_h + sp_len / 2.0
+        for d in emit_paths_with_tabs(sp_pts, [tab1, tab2]):
             body.append(f'    <path d="{d}" />')
 
     # --- SVG ---
